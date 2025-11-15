@@ -1,0 +1,193 @@
+{
+  "meta": {
+    "instanceId": "8c8c5237b8e37b006a7adce87f4b759ef0d60cdc3b7b7d8500ed7b65e2bb7cd1"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "path": "cloudguard-webhook",
+        "httpMethod": "=POST",
+        "options": {}
+      },
+      "id": "7f0e0d1f-5b3a-4c8d-b4e9-2a3c5d6e7f8a",
+      "name": "CloudGuard Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        400,
+        300
+      ],
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "method": "=POST",
+        "url": "=http://localhost:8080/scan",
+        "authentication": "none",
+        "sendBody": true,
+        "contentType": "json",
+        "rawBody": false,
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "8a1f2e3d-6c4b-5d7e-a9f8-3b4c5d6e7f8b",
+      "name": "Call Scanner API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        600,
+        300
+      ],
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "alert_type",
+              "value": "=security_scan"
+            }
+          ],
+          "number": [
+            {
+              "name": "critical_count",
+              "value": "={{ $json.findings ? $json.findings.filter(f => f.severity === 'critical').length : 0 }}"
+            },
+            {
+              "name": "total_findings",
+              "value": "={{ $json.findings ? $json.findings.length : 0 }}"
+            }
+          ],
+          "boolean": [
+            {
+              "name": "has_critical",
+              "value": "={{ ($json.findings ? $json.findings.filter(f => f.severity === 'critical').length : 0) > 0 }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9b2a3f4e-7d5c-6e8f-ba09-4c5d6e7f8a9c",
+      "name": "Process Scan Results",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        800,
+        300
+      ],
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.has_critical }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "ac3b4a5f-8e6d-7f9a-cb1a-5d6e7f8a9bad",
+      "name": "Check Critical",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1000,
+        300
+      ],
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "method": "=POST",
+        "url": "={{ $vars.SLACK_WEBHOOK_URL || 'https://hooks.slack.com/services/YOUR/WEBHOOK/URL' }}",
+        "authentication": "none",
+        "sendBody": true,
+        "contentType": "json",
+        "rawBody": false,
+        "jsonBody": "={{ JSON.stringify({\n  \"text\": \"🚨 Critical Security Alert from CloudGuard\",\n  \"attachments\": [{\n    \"color\": \"danger\",\n    \"fields\": [\n      {\n        \"title\": \"Critical Issues\",\n        \"value\": String($json.critical_count),\n        \"short\": true\n      },\n      {\n        \"title\": \"Total Findings\",\n        \"value\": String($json.total_findings),\n        \"short\": true\n      }\n    ]\n  }]\n}) }}",
+        "options": {
+          "ignoreSSLIssues": true
+        }
+      },
+      "id": "bd4c5b6a-9f7e-8a0b-dc2b-6e7f8a9cbaed",
+      "name": "Send Slack Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        200
+      ],
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "content": "### CloudGuard Security Scanner\n\n**Setup Steps:**\n1. Activate this workflow\n2. Set SLACK_WEBHOOK_URL variable\n3. Ensure scanner runs on port 8080\n4. Test webhook: `/cloudguard-webhook`",
+        "height": 180,
+        "width": 300
+      },
+      "id": "ce5d6c7b-aa8f-9b1c-ed3c-7f8a9bacbdfe",
+      "name": "Setup Notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        380,
+        480
+      ]
+    }
+  ],
+  "connections": {
+    "CloudGuard Webhook": {
+      "main": [
+        [
+          {
+            "node": "Call Scanner API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Scanner API": {
+      "main": [
+        [
+          {
+            "node": "Process Scan Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Scan Results": {
+      "main": [
+        [
+          {
+            "node": "Check Critical",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Critical": {
+      "main": [
+        [
+          {
+            "node": "Send Slack Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "8f0e0d1f-5b3a-4c8d-b4e9-2a3c5d6e7f8a",
+  "id": "99",
+  "tags": []
+}

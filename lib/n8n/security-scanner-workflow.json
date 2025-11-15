@@ -1,0 +1,38 @@
+{
+  "name": "CloudGuard Security Scanner",
+  "nodes": [
+    {
+      "type": "n8n-nodes-base.webhook",
+      "name": "Webhook - Scan Trigger",
+      "parameters": {
+        "path": "cloud-scan-trigger",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "responseData": "firstEntryJson"
+      },
+      "position": {
+        "x": 100,
+        "y": 100
+      }
+    },
+    {
+      "type": "n8n-nodes-base.httpRequest",
+      "name": "AWS API Call",
+      "parameters": {
+        "url": "https://api.aws.amazon.com/v1/describe-instances",
+        "method": "GET",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $json.credentials.aws_access_key }}"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

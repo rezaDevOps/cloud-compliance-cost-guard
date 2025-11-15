@@ -1,0 +1,152 @@
+{
+  "name": "CloudGuard Simple Test",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "cloudguard-test",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        400,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "message",
+              "value": "Scan triggered successfully!"
+            },
+            {
+              "name": "timestamp",
+              "value": "={{ new Date().toISOString() }}"
+            }
+          ],
+          "number": [
+            {
+              "name": "critical_findings",
+              "value": 2
+            },
+            {
+              "name": "high_findings",
+              "value": 5
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set",
+      "name": "Set Test Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        600,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json[\"critical_findings\"] }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "if",
+      "name": "Has Critical?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        800,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Simulate alert message\nconst critical = $json[\"critical_findings\"];\nconst high = $json[\"high_findings\"];\n\nreturn [{\n  json: {\n    alert: `🚨 CRITICAL: ${critical} critical and ${high} high severity findings detected!`,\n    severity: \"critical\",\n    timestamp: new Date().toISOString(),\n    action_required: true\n  }\n}];"
+      },
+      "id": "code",
+      "name": "Create Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normal report\nreturn [{\n  json: {\n    report: \"✅ Scan completed with no critical issues\",\n    severity: \"low\",\n    timestamp: new Date().toISOString(),\n    action_required: false\n  }\n}];"
+      },
+      "id": "code1",
+      "name": "Normal Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Set Test Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Test Data": {
+      "main": [
+        [
+          {
+            "node": "Has Critical?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Critical?": {
+      "main": [
+        [
+          {
+            "node": "Create Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Normal Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "simple-test-v1",
+  "id": "2",
+  "meta": {
+    "instanceId": "test"
+  },
+  "tags": []
+}

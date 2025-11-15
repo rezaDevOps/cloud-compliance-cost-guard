@@ -1,0 +1,163 @@
+{
+  "name": "CloudGuard Security Scanner",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cloud-scan-trigger",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "c4b6b5b0-8c5a-4f96-a4e7-9c8e6b2d1234",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [
+        380,
+        320
+      ],
+      "webhookId": "cloud-scan-trigger"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8080/scan",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "d5c7c6c1-9d6b-5fa7-b5f8-0d9f7c3e2345",
+      "name": "Call Scanner Service",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        600,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process scan results\nconst items = $input.all();\nconst scanResult = items[0].json;\n\n// Count findings by severity\nlet severityCounts = {\n  critical: 0,\n  high: 0,\n  medium: 0,\n  low: 0\n};\n\nconst findings = scanResult.findings || [];\n\nfor (const finding of findings) {\n  if (severityCounts.hasOwnProperty(finding.severity)) {\n    severityCounts[finding.severity]++;\n  }\n}\n\n// Prepare output\nreturn [{\n  json: {\n    ...scanResult,\n    severity_counts: severityCounts,\n    total_findings: findings.length,\n    has_critical: severityCounts.critical > 0,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "e6d8d7d2-0e7c-6fb8-c6f9-1e0a8d4f3456",
+      "name": "Process Findings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        820,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.has_critical }}",
+              "value2": "={{ true }}"
+            }
+          ]
+        }
+      },
+      "id": "f7e9e8e3-1f8d-7fc9-d7fa-2f1b9e5f4567",
+      "name": "Has Critical?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1040,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"🚨 Critical Security Alert!\",\n  \"attachments\": [\n    {\n      \"color\": \"danger\",\n      \"fields\": [\n        {\n          \"title\": \"Account\",\n          \"value\": \"{{ $json.cloud_account_id }}\",\n          \"short\": true\n        },\n        {\n          \"title\": \"Critical Issues\",\n          \"value\": \"{{ $json.severity_counts.critical }}\",\n          \"short\": true\n        },\n        {\n          \"title\": \"Total Findings\",\n          \"value\": \"{{ $json.total_findings }}\",\n          \"short\": true\n        }\n      ],\n      \"footer\": \"CloudGuard Scanner\",\n      \"ts\": {{ Math.floor(Date.now() / 1000) }}\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "a8faf9f4-20a9-8fda-e8fb-3f2c0f6f5678",
+      "name": "Send Slack Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1260,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## CloudGuard Security Scanner Workflow\n\nThis workflow:\n1. Receives scan requests via webhook\n2. Calls the scanner service\n3. Processes findings\n4. Sends alerts for critical issues\n\n### Setup Required:\n- Configure SLACK_WEBHOOK_URL in n8n environment\n- Ensure scanner service is running on port 8080\n- Configure Supabase credentials (if using DB node)",
+        "height": 253.45122136145276,
+        "width": 451.2617411158206
+      },
+      "id": "b9fbfaf5-31ba-9feb-f9fc-4f3d1f7f6789",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        260,
+        540
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Call Scanner Service",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Scanner Service": {
+      "main": [
+        [
+          {
+            "node": "Process Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Findings": {
+      "main": [
+        [
+          {
+            "node": "Has Critical?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Critical?": {
+      "main": [
+        [
+          {
+            "node": "Send Slack Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "c4f1e2d3-4567-8901-2345-678901234567",
+  "id": "wXmFKmJQNd3x2Yjb",
+  "meta": {
+    "instanceId": "cloudguard-instance"
+  },
+  "tags": []
+}
