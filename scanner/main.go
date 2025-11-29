@@ -42,16 +42,23 @@ type ScanResult struct {
 
 func main() {
 	http.HandleFunc("/scan", handleScan)
-	
+	http.HandleFunc("/health", handleHealth)
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
-	
+
 	log.Printf("Scanner service starting on port %s", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
 }
 
 func handleScan(w http.ResponseWriter, r *http.Request) {

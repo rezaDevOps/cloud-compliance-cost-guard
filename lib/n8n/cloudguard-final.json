@@ -22,7 +22,7 @@
     {
       "parameters": {
         "method": "=POST",
-        "url": "=http://localhost:8080/scan",
+        "url": "=http://scanner:8080/scan",
         "authentication": "none",
         "sendBody": true,
         "contentType": "json",

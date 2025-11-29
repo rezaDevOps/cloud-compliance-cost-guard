@@ -1,6 +1,61 @@
 # n8n Workflow Import & Setup Guide
 
-## 📥 Workflow Import Anleitung
+## 🚀 Hetzner Production Deployment (mit Traefik)
+
+### Voraussetzungen
+
+- Hetzner Server mit Docker & Docker Compose
+- Traefik als Reverse Proxy (mit `traefik-public` Netzwerk)
+- Domain: `n8n.awsdevzone.info` (oder deine eigene)
+
+### Schritt 1: Dateien auf Hetzner kopieren
+
+```bash
+# Vom lokalen Rechner
+scp docker-compose.hetzner.yml root@DEIN_HETZNER_SERVER:/opt/cloudguard/
+scp .env.hetzner.example root@DEIN_HETZNER_SERVER:/opt/cloudguard/.env
+scp -r scanner/ root@DEIN_HETZNER_SERVER:/opt/cloudguard/scanner/
+scp -r lib/n8n/ root@DEIN_HETZNER_SERVER:/opt/cloudguard/lib/n8n/
+```
+
+### Schritt 2: Environment Variables konfigurieren
+
+```bash
+# Auf Hetzner Server
+cd /opt/cloudguard
+nano .env  # Bearbeite die Werte
+```
+
+Wichtige Werte:
+- `N8N_BASIC_AUTH_PASSWORD`: Sicheres Passwort setzen!
+- `SUPABASE_URL` und `SUPABASE_SERVICE_KEY`
+- `SLACK_WEBHOOK_URL` (für Alerts)
+- `AWS_*` Credentials (für Scanner)
+
+### Schritt 3: Services starten
+
+```bash
+cd /opt/cloudguard
+docker-compose -f docker-compose.hetzner.yml up -d
+```
+
+### Schritt 4: Workflow importieren
+
+1. Öffne: https://n8n.awsdevzone.info
+2. Login mit Basic Auth (aus .env)
+3. Importiere `lib/n8n/cloudguard-final.json`
+4. Aktiviere den Workflow (Toggle auf "Active")
+
+### Schritt 5: Webhook URL in Next.js App konfigurieren
+
+In deiner `.env.local` (lokale Entwicklung) oder Vercel/Production:
+```bash
+N8N_WEBHOOK_URL=https://n8n.awsdevzone.info/webhook/cloudguard-webhook
+```
+
+---
+
+## 💻 Lokale Entwicklung
 
 ### Schritt 1: n8n starten
 
