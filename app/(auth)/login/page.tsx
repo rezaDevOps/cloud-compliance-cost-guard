@@ -6,9 +6,9 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Cloud } from 'lucide-react'
 import Link from 'next/link'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -16,7 +16,21 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const router = useRouter()
+  const searchParams = useSearchParams()
   const supabase = createClient()
+
+  // Check for error messages from URL params
+  useEffect(() => {
+    const errorParam = searchParams.get('error')
+    if (errorParam) {
+      const errorMessages: Record<string, string> = {
+        'setup_failed': 'Account setup failed. Please try again or contact support.',
+        'org_creation_failed': 'Failed to create organization. Please try again.',
+        'user_creation_failed': 'Failed to create user record. Please try again.'
+      }
+      setError(errorMessages[errorParam] || 'An error occurred during login.')
+    }
+  }, [searchParams])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
