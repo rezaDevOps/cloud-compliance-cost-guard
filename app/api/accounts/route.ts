@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
 // GET /api/accounts - List all cloud accounts for the user's organization
+// Force rebuild: 2025-11-30
 export async function GET() {
   try {
     const supabase = await createClient()
