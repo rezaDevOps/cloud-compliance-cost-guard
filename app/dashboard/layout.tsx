@@ -8,11 +8,23 @@ export default async function DashboardLayout({
   children: React.ReactNode
 }) {
   const supabase = await createClient()
-  
+
   const { data: { user } } = await supabase.auth.getUser()
-  
+
   if (!user) {
     redirect('/login')
+  }
+
+  // Check if user exists in public.users table
+  const { data: userData } = await supabase
+    .from('users')
+    .select('id, organization_id')
+    .eq('id', user.id)
+    .single()
+
+  // If user doesn't exist in public.users, redirect to callback to create it
+  if (!userData) {
+    redirect('/api/auth/callback')
   }
 
   return (

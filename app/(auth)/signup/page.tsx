@@ -44,7 +44,8 @@ export default function SignupPage() {
       if (authError) {
         setError(authError.message)
       } else {
-        router.push('/dashboard')
+        // Redirect through callback to ensure user record is created
+        router.push('/api/auth/callback')
       }
     } catch (err) {
       setError('Ein unerwarteter Fehler ist aufgetreten')
