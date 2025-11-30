@@ -6,20 +6,14 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Cloud } from 'lucide-react'
 import Link from 'next/link'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter, useSearchParams } from 'next/navigation'
 
-export default function LoginPage() {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const router = useRouter()
+// Component that uses useSearchParams - must be wrapped in Suspense
+function ErrorHandler({ setError }: { setError: (error: string | null) => void }) {
   const searchParams = useSearchParams()
-  const supabase = createClient()
 
-  // Check for error messages from URL params
   useEffect(() => {
     const errorParam = searchParams.get('error')
     if (errorParam) {
@@ -30,7 +24,18 @@ export default function LoginPage() {
       }
       setError(errorMessages[errorParam] || 'An error occurred during login.')
     }
-  }, [searchParams])
+  }, [searchParams, setError])
+
+  return null
+}
+
+function LoginForm() {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const router = useRouter()
+  const supabase = createClient()
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -57,6 +62,9 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-white p-4">
+      <Suspense fallback={null}>
+        <ErrorHandler setError={setError} />
+      </Suspense>
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <Link href="/" className="flex justify-center mb-4">
@@ -90,15 +98,15 @@ export default function LoginPage() {
                 required
               />
             </div>
-            
+
             {error && (
               <div className="text-sm text-red-600 bg-red-50 p-3 rounded-md">
                 {error}
               </div>
             )}
 
-            <Button 
-              type="submit" 
+            <Button
+              type="submit"
               className="w-full bg-blue-600 hover:bg-blue-700"
               disabled={loading}
             >
@@ -122,4 +130,8 @@ export default function LoginPage() {
       </Card>
     </div>
   )
+}
+
+export default function LoginPage() {
+  return <LoginForm />
 }
