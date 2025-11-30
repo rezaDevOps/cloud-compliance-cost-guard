@@ -1,3 +1,5 @@
+'use client'
+
 import { DashboardMetrics } from '@/components/dashboard/metrics'
 import { RecentScans } from '@/components/dashboard/recent-scans'
 import { CostChart } from '@/components/dashboard/cost-chart'
