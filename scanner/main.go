@@ -158,18 +158,31 @@ func scanEC2(sess *session.Session) []Finding {
 					Recommendation: "Consider using private subnets with NAT Gateway",
 				})
 			}
-			
+
 			// Check for unencrypted volumes
+			// Note: We need to check each volume separately using DescribeVolumes
 			for _, bdm := range instance.BlockDeviceMappings {
-				if bdm.Ebs != nil && bdm.Ebs.Encrypted != nil && !*bdm.Ebs.Encrypted {
-					findings = append(findings, Finding{
-						Type:           "security",
-						Severity:       "medium",
-						ResourceID:     *bdm.Ebs.VolumeId,
-						ResourceType:   "EBS",
-						Issue:          "EBS volume is not encrypted",
-						Recommendation: "Enable encryption for EBS volumes",
+				if bdm.Ebs != nil && bdm.Ebs.VolumeId != nil {
+					// Get volume details to check encryption
+					volumes, err := svc.DescribeVolumes(&ec2.DescribeVolumesInput{
+						VolumeIds: []*string{bdm.Ebs.VolumeId},
 					})
+					if err != nil {
+						continue
+					}
+
+					for _, volume := range volumes.Volumes {
+						if volume.Encrypted != nil && !*volume.Encrypted {
+							findings = append(findings, Finding{
+								Type:           "security",
+								Severity:       "medium",
+								ResourceID:     *volume.VolumeId,
+								ResourceType:   "EBS",
+								Issue:          "EBS volume is not encrypted",
+								Recommendation: "Enable encryption for EBS volumes",
+							})
+						}
+					}
 				}
 			}
 		}
