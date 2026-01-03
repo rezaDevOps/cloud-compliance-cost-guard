@@ -22,7 +22,7 @@
     {
       "parameters": {
         "method": "=POST",
-        "url": "=http://scanner:8080/scan",
+        "url": "=https://cloudguard-scanner.onrender.com/scan",
         "authentication": "none",
         "sendBody": true,
         "contentType": "json",
