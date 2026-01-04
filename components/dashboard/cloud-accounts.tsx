@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Cloud, Trash2, AlertCircle } from 'lucide-react'
+import { Plus, Cloud, Trash2, AlertCircle, Play } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
 interface CloudAccount {
@@ -24,6 +24,7 @@ export function CloudAccounts() {
   const [loading, setLoading] = useState(true)
   const [showAddForm, setShowAddForm] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [scanning, setScanning] = useState<string | null>(null)
   const [formData, setFormData] = useState({
     provider: 'aws',
     account_name: '',
@@ -118,6 +119,36 @@ export function CloudAccounts() {
       }
     } catch (err) {
       setError('Failed to delete cloud account')
+    }
+  }
+
+  const handleRunScan = async (accountId: string) => {
+    setScanning(accountId)
+    setError(null)
+
+    try {
+      const response = await fetch('/api/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cloudAccountId: accountId,
+          scanType: 'security'
+        })
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        alert(`Scan initiated successfully! Scan ID: ${data.scan_id}`)
+        // Optionally refresh accounts to update last_scan_at
+        fetchAccounts()
+      } else {
+        setError(data.error || 'Failed to initiate scan')
+      }
+    } catch (err) {
+      setError('Failed to initiate scan')
+    } finally {
+      setScanning(null)
     }
   }
 
@@ -299,6 +330,15 @@ export function CloudAccounts() {
                   >
                     {account.is_active ? 'Active' : 'Inactive'}
                   </span>
+                  <Button
+                    size="sm"
+                    onClick={() => handleRunScan(account.id)}
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                    disabled={scanning === account.id}
+                  >
+                    <Play className="w-4 h-4 mr-1" />
+                    {scanning === account.id ? 'Scanning...' : 'Run Scan'}
+                  </Button>
                   <Button
                     variant="ghost"
                     size="sm"
