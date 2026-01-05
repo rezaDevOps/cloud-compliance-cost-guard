@@ -42,6 +42,57 @@
     },
     {
       "parameters": {
+        "method": "=PATCH",
+        "url": "={{ $env.SUPABASE_URL || 'https://your-project.supabase.co' }}/rest/v1/scan_results",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "=eq.{{ $('CloudGuard Webhook').item.json.scan_id }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "rawBody": false,
+        "jsonBody": "={{ JSON.stringify({\n  status: 'completed',\n  findings: $json.findings || [],\n  severity_counts: {\n    critical: $json.findings ? $json.findings.filter(f => f.severity === 'critical').length : 0,\n    high: $json.findings ? $json.findings.filter(f => f.severity === 'high').length : 0,\n    medium: $json.findings ? $json.findings.filter(f => f.severity === 'medium').length : 0,\n    low: $json.findings ? $json.findings.filter(f => f.severity === 'low').length : 0\n  },\n  recommendations: $json.recommendations || []\n}) }}",
+        "options": {}
+      },
+      "id": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+      "name": "Update Supabase Scan Results",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        800,
+        300
+      ],
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
         "values": {
           "string": [
             {
@@ -73,7 +124,7 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 1,
       "position": [
-        800,
+        1000,
         300
       ],
       "notesInFlow": false
@@ -94,7 +145,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
       "position": [
-        1000,
+        1200,
         300
       ],
       "notesInFlow": false
@@ -117,7 +168,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 2,
       "position": [
-        1200,
+        1400,
         200
       ],
       "notesInFlow": false
@@ -151,6 +202,17 @@
       ]
     },
     "Call Scanner API": {
+      "main": [
+        [
+          {
+            "node": "Update Supabase Scan Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Supabase Scan Results": {
       "main": [
         [
           {
