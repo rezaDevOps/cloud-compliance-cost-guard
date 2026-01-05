@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Cloud, Trash2, AlertCircle } from 'lucide-react'
+import { Plus, Cloud, Trash2, AlertCircle, Play, Loader2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
 interface CloudAccount {
@@ -24,6 +24,8 @@ export function CloudAccounts() {
   const [loading, setLoading] = useState(true)
   const [showAddForm, setShowAddForm] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [scanningAccountId, setScanningAccountId] = useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [formData, setFormData] = useState({
     provider: 'aws',
     account_name: '',
@@ -121,6 +123,44 @@ export function CloudAccounts() {
     }
   }
 
+  const handleScanAccount = async (accountId: string, scanType: 'security' | 'cost' | 'compliance' = 'security') => {
+    setError(null)
+    setSuccessMessage(null)
+    setScanningAccountId(accountId)
+
+    try {
+      const response = await fetch('/api/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cloudAccountId: accountId,
+          scanType: scanType
+        })
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        setSuccessMessage(`Scan initiated successfully! Scan ID: ${data.scan_id}`)
+        // Update the account's last_scan_at
+        setAccounts(accounts.map(acc =>
+          acc.id === accountId
+            ? { ...acc, last_scan_at: new Date().toISOString() }
+            : acc
+        ))
+
+        // Clear success message after 5 seconds
+        setTimeout(() => setSuccessMessage(null), 5000)
+      } else {
+        setError(data.error || 'Failed to initiate scan')
+      }
+    } catch (err) {
+      setError('Failed to initiate scan. Please check that n8n is running.')
+    } finally {
+      setScanningAccountId(null)
+    }
+  }
+
   const getProviderIcon = (provider: string) => {
     switch (provider) {
       case 'aws':
@@ -161,6 +201,13 @@ export function CloudAccounts() {
           <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md flex items-start">
             <AlertCircle className="w-5 h-5 text-red-600 mr-2 mt-0.5 flex-shrink-0" />
             <p className="text-sm text-red-800">{error}</p>
+          </div>
+        )}
+
+        {successMessage && (
+          <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-md flex items-start">
+            <AlertCircle className="w-5 h-5 text-green-600 mr-2 mt-0.5 flex-shrink-0" />
+            <p className="text-sm text-green-800">{successMessage}</p>
           </div>
         )}
 
@@ -299,6 +346,24 @@ export function CloudAccounts() {
                   >
                     {account.is_active ? 'Active' : 'Inactive'}
                   </span>
+                  <Button
+                    size="sm"
+                    onClick={() => handleScanAccount(account.id, 'security')}
+                    disabled={scanningAccountId === account.id}
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    {scanningAccountId === account.id ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                        Scanning...
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-4 h-4 mr-1" />
+                        Scan
+                      </>
+                    )}
+                  </Button>
                   <Button
                     variant="ghost"
                     size="sm"
