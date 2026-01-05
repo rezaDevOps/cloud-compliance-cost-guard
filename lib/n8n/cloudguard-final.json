@@ -42,6 +42,25 @@
     },
     {
       "parameters": {
+        "agent": "conversationalAgent",
+        "promptType": "define",
+        "text": "=You are a cloud security analyst AI. Analyze the following scan results:\n\n{{ JSON.stringify($json, null, 2) }}\n\nYour tasks:\n1. If there are errors in the scan, analyze and explain them clearly\n2. Categorize all findings by severity (critical, high, medium, low)\n3. Generate actionable recommendations for each finding\n4. Provide a risk score (1-10) for the overall scan\n5. Identify the top 3 most urgent issues to fix\n\nReturn your analysis in JSON format with these fields:\n- status: 'success' or 'error'\n- error_analysis: (if error exists) detailed explanation\n- findings: array of findings with enhanced descriptions\n- recommendations: array of prioritized recommendations\n- risk_score: number 1-10\n- top_issues: array of top 3 urgent issues\n- summary: brief executive summary",
+        "options": {
+          "systemMessage": "You are an expert cloud security analyst specializing in AWS, Azure, and GCP security. You provide clear, actionable insights and prioritize based on real-world impact."
+        }
+      },
+      "id": "2b3c4d5e-6f7a-8b9c-0d1e-2f3a4b5c6d7e",
+      "name": "AI Security Analyst",
+      "type": "n8n-nodes-base.agent",
+      "typeVersion": 1,
+      "position": [
+        800,
+        300
+      ],
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
         "method": "=PATCH",
         "url": "={{ $env.SUPABASE_URL || 'https://your-project.supabase.co' }}/rest/v1/scan_results",
         "authentication": "none",
@@ -78,7 +97,7 @@
         "sendBody": true,
         "contentType": "json",
         "rawBody": false,
-        "jsonBody": "={{ JSON.stringify({\n  status: 'completed',\n  findings: $json.findings || [],\n  severity_counts: {\n    critical: $json.findings ? $json.findings.filter(f => f.severity === 'critical').length : 0,\n    high: $json.findings ? $json.findings.filter(f => f.severity === 'high').length : 0,\n    medium: $json.findings ? $json.findings.filter(f => f.severity === 'medium').length : 0,\n    low: $json.findings ? $json.findings.filter(f => f.severity === 'low').length : 0\n  },\n  recommendations: $json.recommendations || []\n}) }}",
+        "jsonBody": "={{ JSON.stringify({\n  status: $json.status || 'completed',\n  findings: $json.findings || [],\n  severity_counts: {\n    critical: $json.findings ? $json.findings.filter(f => f.severity === 'critical').length : 0,\n    high: $json.findings ? $json.findings.filter(f => f.severity === 'high').length : 0,\n    medium: $json.findings ? $json.findings.filter(f => f.severity === 'medium').length : 0,\n    low: $json.findings ? $json.findings.filter(f => f.severity === 'low').length : 0\n  },\n  recommendations: $json.recommendations || [],\n  ai_analysis: {\n    risk_score: $json.risk_score || 0,\n    top_issues: $json.top_issues || [],\n    summary: $json.summary || ''\n  }\n}) }}",
         "options": {}
       },
       "id": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
@@ -86,7 +105,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 2,
       "position": [
-        800,
+        1000,
         300
       ],
       "notesInFlow": false
@@ -124,7 +143,7 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 1,
       "position": [
-        1000,
+        1200,
         300
       ],
       "notesInFlow": false
@@ -145,7 +164,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
       "position": [
-        1200,
+        1400,
         300
       ],
       "notesInFlow": false
@@ -168,7 +187,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 2,
       "position": [
-        1400,
+        1600,
         200
       ],
       "notesInFlow": false
@@ -202,6 +221,17 @@
       ]
     },
     "Call Scanner API": {
+      "main": [
+        [
+          {
+            "node": "AI Security Analyst",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Security Analyst": {
       "main": [
         [
           {
