@@ -10,7 +10,7 @@ services:
       - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
       - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
-      - N8N_WEBHOOK_URL=http://n8n:5678/webhook/cloud-scan-trigger
+      - N8N_WEBHOOK_URL=http://n8n:5678/webhook/cloudguard-webhook
       - OPENAI_API_KEY=${OPENAI_API_KEY}
     depends_on:
       - n8n
