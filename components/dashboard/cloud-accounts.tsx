@@ -348,19 +348,19 @@ export function CloudAccounts() {
                   </span>
                   <Button
                     size="sm"
-                    onClick={() => handleScanAccount(account.id, 'security')}
+                    onClick={() => handleScanAccount(account.id, 'cost')}
                     disabled={scanningAccountId === account.id}
-                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                    className="bg-green-600 hover:bg-green-700 text-white"
                   >
                     {scanningAccountId === account.id ? (
                       <>
                         <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                        Scanning...
+                        Analyzing...
                       </>
                     ) : (
                       <>
                         <Play className="w-4 h-4 mr-1" />
-                        Scan
+                        Find Savings
                       </>
                     )}
                   </Button>

@@ -44,13 +44,13 @@
       "parameters": {
         "agent": "conversationalAgent",
         "promptType": "define",
-        "text": "=You are a cloud security analyst AI. Analyze the following scan results:\n\n{{ JSON.stringify($json, null, 2) }}\n\nYour tasks:\n1. If there are errors in the scan, analyze and explain them clearly\n2. Categorize all findings by severity (critical, high, medium, low)\n3. Generate actionable recommendations for each finding\n4. Provide a risk score (1-10) for the overall scan\n5. Identify the top 3 most urgent issues to fix\n\nReturn your analysis in JSON format with these fields:\n- status: 'success' or 'error'\n- error_analysis: (if error exists) detailed explanation\n- findings: array of findings with enhanced descriptions\n- recommendations: array of prioritized recommendations\n- risk_score: number 1-10\n- top_issues: array of top 3 urgent issues\n- summary: brief executive summary",
+        "text": "=You are a cloud cost optimization expert AI. Analyze the following AWS cost scan results:\n\n{{ JSON.stringify($json, null, 2) }}\n\nYour tasks:\n1. Calculate TOTAL potential monthly savings from all findings\n2. Prioritize recommendations by savings amount (highest first)\n3. Provide step-by-step remediation guides for top 3 savings opportunities\n4. Identify quick wins (easy fixes with good savings)\n5. Suggest reserved instance or spot instance opportunities\n6. Calculate ROI and implementation effort for each recommendation\n\nReturn your analysis in JSON format with these fields:\n- status: 'success' or 'error'\n- total_monthly_savings: total potential savings across all findings\n- findings: array of findings with enhanced descriptions\n- recommendations: array sorted by savings (highest first), each with: {action, savings, effort, roi, steps}\n- quick_wins: array of easy fixes with good ROI\n- reserved_instance_candidates: array of instances that could benefit from RI\n- spot_instance_candidates: array of workloads suitable for spot instances\n- summary: executive summary focused on cost savings",
         "options": {
-          "systemMessage": "You are an expert cloud security analyst specializing in AWS, Azure, and GCP security. You provide clear, actionable insights and prioritize based on real-world impact."
+          "systemMessage": "You are an expert cloud cost optimization consultant specializing in AWS, Azure, and GCP. You help businesses reduce cloud spending through actionable recommendations. Focus on ROI, implementation effort, and real-world savings. Always provide specific dollar amounts and step-by-step guides."
         }
       },
       "id": "2b3c4d5e-6f7a-8b9c-0d1e-2f3a4b5c6d7e",
-      "name": "AI Security Analyst",
+      "name": "AI Cost Optimizer",
       "type": "n8n-nodes-base.agent",
       "typeVersion": 1,
       "position": [
@@ -224,14 +224,14 @@
       "main": [
         [
           {
-            "node": "AI Security Analyst",
+            "node": "AI Cost Optimizer",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "AI Security Analyst": {
+    "AI Cost Optimizer": {
       "main": [
         [
           {
