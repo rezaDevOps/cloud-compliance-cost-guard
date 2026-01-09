@@ -10,6 +10,7 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/cloudwatch"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/aws/aws-sdk-go/service/iam"
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -23,12 +24,14 @@ type ScanRequest struct {
 }
 
 type Finding struct {
-	Type           string `json:"type"`
-	Severity       string `json:"severity"`
-	ResourceID     string `json:"resource_id"`
-	ResourceType   string `json:"resource_type"`
-	Issue          string `json:"issue"`
-	Recommendation string `json:"recommendation"`
+	Type                string  `json:"type"`
+	Severity            string  `json:"severity"`
+	ResourceID          string  `json:"resource_id"`
+	ResourceType        string  `json:"resource_type"`
+	Issue               string  `json:"issue"`
+	Recommendation      string  `json:"recommendation"`
+	EstimatedMonthlyCost float64 `json:"estimated_monthly_cost,omitempty"`
+	PotentialSavings    float64 `json:"potential_savings,omitempty"`
 }
 
 type ScanResult struct {
@@ -118,18 +121,27 @@ func scanAWS(req ScanRequest) []Finding {
 		return findings
 	}
 
-	if req.ScanType == "security" {
+	switch req.ScanType {
+	case "security":
 		// Scan EC2 instances
 		ec2Findings := scanEC2(sess)
 		findings = append(findings, ec2Findings...)
-		
+
 		// Scan S3 buckets
 		s3Findings := scanS3(sess)
 		findings = append(findings, s3Findings...)
-		
+
 		// Scan IAM
 		iamFindings := scanIAM(sess)
 		findings = append(findings, iamFindings...)
+
+	case "cost":
+		// Cost optimization scans
+		findings = append(findings, scanIdleEC2Instances(sess)...)
+		findings = append(findings, scanUnattachedEBSVolumes(sess)...)
+		findings = append(findings, scanUnusedElasticIPs(sess)...)
+		findings = append(findings, scanOldSnapshots(sess)...)
+		findings = append(findings, scanUndersizedInstances(sess)...)
 	}
 
 	return findings
@@ -282,4 +294,237 @@ func scanIAM(sess *session.Session) []Finding {
 	}
 	
 	return findings
+}
+// Cost Optimization Scanning Functions
+
+func scanIdleEC2Instances(sess *session.Session) []Finding {
+	findings := []Finding{}
+	ec2Svc := ec2.New(sess)
+	cwSvc := cloudwatch.New(sess)
+
+	result, err := ec2Svc.DescribeInstances(&ec2.DescribeInstancesInput{
+		Filters: []*ec2.Filter{
+			{
+				Name:   aws.String("instance-state-name"),
+				Values: []*string{aws.String("running")},
+			},
+		},
+	})
+	if err != nil {
+		log.Printf("Error describing instances: %v", err)
+		return findings
+	}
+
+	for _, reservation := range result.Reservations {
+		for _, instance := range reservation.Instances {
+			endTime := time.Now()
+			startTime := endTime.Add(-7 * 24 * time.Hour)
+
+			cpuMetrics, err := cwSvc.GetMetricStatistics(&cloudwatch.GetMetricStatisticsInput{
+				Namespace:  aws.String("AWS/EC2"),
+				MetricName: aws.String("CPUUtilization"),
+				Dimensions: []*cloudwatch.Dimension{
+					{Name: aws.String("InstanceId"), Value: instance.InstanceId},
+				},
+				StartTime:  &startTime,
+				EndTime:    &endTime,
+				Period:     aws.Int64(3600),
+				Statistics: []*string{aws.String("Average")},
+			})
+
+			if err == nil && len(cpuMetrics.Datapoints) > 0 {
+				totalCPU := 0.0
+				for _, dp := range cpuMetrics.Datapoints {
+					if dp.Average != nil {
+						totalCPU += *dp.Average
+					}
+				}
+				avgCPU := totalCPU / float64(len(cpuMetrics.Datapoints))
+
+				if avgCPU < 5.0 {
+					monthlyCost := estimateEC2Cost(instance.InstanceType)
+					findings = append(findings, Finding{
+						Type:                "cost",
+						Severity:            "high",
+						ResourceID:          *instance.InstanceId,
+						ResourceType:        "EC2",
+						Issue:               fmt.Sprintf("Idle instance (avg CPU: %.2f%%)", avgCPU),
+						Recommendation:      "Stop or terminate to save $" + fmt.Sprintf("%.2f/month", monthlyCost),
+						EstimatedMonthlyCost: monthlyCost,
+						PotentialSavings:    monthlyCost,
+					})
+				}
+			}
+		}
+	}
+	return findings
+}
+
+func scanUnattachedEBSVolumes(sess *session.Session) []Finding {
+	findings := []Finding{}
+	svc := ec2.New(sess)
+
+	result, err := svc.DescribeVolumes(&ec2.DescribeVolumesInput{
+		Filters: []*ec2.Filter{
+			{Name: aws.String("status"), Values: []*string{aws.String("available")}},
+		},
+	})
+	if err != nil {
+		return findings
+	}
+
+	for _, volume := range result.Volumes {
+		sizeGB := float64(*volume.Size)
+		monthlyCost := sizeGB * 0.10
+
+		findings = append(findings, Finding{
+			Type:                "cost",
+			Severity:            "medium",
+			ResourceID:          *volume.VolumeId,
+			ResourceType:        "EBS",
+			Issue:               fmt.Sprintf("Unattached volume (%d GB)", *volume.Size),
+			Recommendation:      "Delete or snapshot unused volumes. Save $" + fmt.Sprintf("%.2f/month", monthlyCost),
+			EstimatedMonthlyCost: monthlyCost,
+			PotentialSavings:    monthlyCost,
+		})
+	}
+	return findings
+}
+
+func scanUnusedElasticIPs(sess *session.Session) []Finding {
+	findings := []Finding{}
+	svc := ec2.New(sess)
+
+	result, err := svc.DescribeAddresses(&ec2.DescribeAddressesInput{})
+	if err != nil {
+		return findings
+	}
+
+	for _, addr := range result.Addresses {
+		if addr.InstanceId == nil || *addr.InstanceId == "" {
+			monthlyCost := 3.65
+			findings = append(findings, Finding{
+				Type:                "cost",
+				Severity:            "low",
+				ResourceID:          *addr.AllocationId,
+				ResourceType:        "ElasticIP",
+				Issue:               "Unused Elastic IP",
+				Recommendation:      "Release to save $3.65/month",
+				EstimatedMonthlyCost: monthlyCost,
+				PotentialSavings:    monthlyCost,
+			})
+		}
+	}
+	return findings
+}
+
+func scanOldSnapshots(sess *session.Session) []Finding {
+	findings := []Finding{}
+	svc := ec2.New(sess)
+
+	result, err := svc.DescribeSnapshots(&ec2.DescribeSnapshotsInput{
+		OwnerIds: []*string{aws.String("self")},
+	})
+	if err != nil {
+		return findings
+	}
+
+	oneYearAgo := time.Now().AddDate(-1, 0, 0)
+	for _, snapshot := range result.Snapshots {
+		if snapshot.StartTime.Before(oneYearAgo) {
+			sizeGB := float64(*snapshot.VolumeSize)
+			monthlyCost := sizeGB * 0.05
+
+			findings = append(findings, Finding{
+				Type:                "cost",
+				Severity:            "low",
+				ResourceID:          *snapshot.SnapshotId,
+				ResourceType:        "Snapshot",
+				Issue:               fmt.Sprintf("Old snapshot (%d GB, >1 year)", *snapshot.VolumeSize),
+				Recommendation:      "Delete if no longer needed. Save $" + fmt.Sprintf("%.2f/month", monthlyCost),
+				EstimatedMonthlyCost: monthlyCost,
+				PotentialSavings:    monthlyCost,
+			})
+		}
+	}
+	return findings
+}
+
+func scanUndersizedInstances(sess *session.Session) []Finding {
+	findings := []Finding{}
+	ec2Svc := ec2.New(sess)
+	cwSvc := cloudwatch.New(sess)
+
+	result, err := ec2Svc.DescribeInstances(&ec2.DescribeInstancesInput{
+		Filters: []*ec2.Filter{
+			{Name: aws.String("instance-state-name"), Values: []*string{aws.String("running")}},
+		},
+	})
+	if err != nil {
+		return findings
+	}
+
+	for _, reservation := range result.Reservations {
+		for _, instance := range reservation.Instances {
+			endTime := time.Now()
+			startTime := endTime.Add(-7 * 24 * time.Hour)
+
+			cpuMetrics, _ := cwSvc.GetMetricStatistics(&cloudwatch.GetMetricStatisticsInput{
+				Namespace:  aws.String("AWS/EC2"),
+				MetricName: aws.String("CPUUtilization"),
+				Dimensions: []*cloudwatch.Dimension{
+					{Name: aws.String("InstanceId"), Value: instance.InstanceId},
+				},
+				StartTime:  &startTime,
+				EndTime:    &endTime,
+				Period:     aws.Int64(3600),
+				Statistics: []*string{aws.String("Average")},
+			})
+
+			if len(cpuMetrics.Datapoints) > 0 {
+				totalCPU := 0.0
+				for _, dp := range cpuMetrics.Datapoints {
+					if dp.Average != nil {
+						totalCPU += *dp.Average
+					}
+				}
+				avgCPU := totalCPU / float64(len(cpuMetrics.Datapoints))
+
+				if avgCPU >= 10 && avgCPU < 30 {
+					currentCost := estimateEC2Cost(instance.InstanceType)
+					potentialSavings := currentCost * 0.5
+
+					findings = append(findings, Finding{
+						Type:                "cost",
+						Severity:            "medium",
+						ResourceID:          *instance.InstanceId,
+						ResourceType:        "EC2",
+						Issue:               fmt.Sprintf("Oversized instance (avg CPU: %.2f%%)", avgCPU),
+						Recommendation:      "Downsize to save ~$" + fmt.Sprintf("%.2f/month", potentialSavings),
+						EstimatedMonthlyCost: currentCost,
+						PotentialSavings:    potentialSavings,
+					})
+				}
+			}
+		}
+	}
+	return findings
+}
+
+func estimateEC2Cost(instanceType *string) float64 {
+	if instanceType == nil {
+		return 0
+	}
+
+	priceMap := map[string]float64{
+		"t2.micro": 8.76, "t2.small": 17.52, "t2.medium": 35.04, "t2.large": 70.08,
+		"t3.micro": 7.59, "t3.small": 15.18, "t3.medium": 30.37, "t3.large": 60.74,
+		"m5.large": 70.08, "m5.xlarge": 140.16, "m5.2xlarge": 280.32,
+		"c5.large": 62.78, "c5.xlarge": 125.55,
+	}
+
+	if cost, ok := priceMap[*instanceType]; ok {
+		return cost
+	}
+	return 50.0
 }
