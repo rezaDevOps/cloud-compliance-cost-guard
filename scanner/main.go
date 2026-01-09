@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/cloudwatch"
+	"github.com/aws/aws-sdk-go/service/costexplorer"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/aws/aws-sdk-go/service/iam"
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -136,12 +137,22 @@ func scanAWS(req ScanRequest) []Finding {
 		findings = append(findings, iamFindings...)
 
 	case "cost":
-		// Cost optimization scans
+		// Unused Resource Detection
 		findings = append(findings, scanIdleEC2Instances(sess)...)
 		findings = append(findings, scanUnattachedEBSVolumes(sess)...)
 		findings = append(findings, scanUnusedElasticIPs(sess)...)
 		findings = append(findings, scanOldSnapshots(sess)...)
+		findings = append(findings, scanStoppedInstances(sess)...)
+
+		// Right-Sizing Analysis
+		findings = append(findings, performRightSizingAnalysis(sess)...)
 		findings = append(findings, scanUndersizedInstances(sess)...)
+
+		// Reserved Instance Recommendations
+		findings = append(findings, analyzeReservedInstanceOpportunities(sess)...)
+
+		// Spot Instance Opportunities
+		findings = append(findings, analyzeSpotInstanceOpportunities(sess)...)
 	}
 
 	return findings
@@ -527,4 +538,275 @@ func estimateEC2Cost(instanceType *string) float64 {
 		return cost
 	}
 	return 50.0
+}
+
+// Advanced Cost Optimization Functions
+
+func scanStoppedInstances(sess *session.Session) []Finding {
+	findings := []Finding{}
+	svc := ec2.New(sess)
+
+	result, err := svc.DescribeInstances(&ec2.DescribeInstancesInput{
+		Filters: []*ec2.Filter{
+			{Name: aws.String("instance-state-name"), Values: []*string{aws.String("stopped")}},
+		},
+	})
+	if err != nil {
+		return findings
+	}
+
+	for _, reservation := range result.Reservations {
+		for _, instance := range reservation.Instances {
+			stoppedDuration := time.Since(*instance.LaunchTime)
+			if stoppedDuration > 7*24*time.Hour {
+				monthlyCost := estimateEC2Cost(instance.InstanceType) * 0.1 // EBS storage cost
+				findings = append(findings, Finding{
+					Type:                "cost",
+					Severity:            "medium",
+					ResourceID:          *instance.InstanceId,
+					ResourceType:        "EC2",
+					Issue:               fmt.Sprintf("Instance stopped for %d days", int(stoppedDuration.Hours()/24)),
+					Recommendation:      "Terminate if no longer needed. Currently paying for EBS storage",
+					EstimatedMonthlyCost: monthlyCost,
+					PotentialSavings:    monthlyCost,
+				})
+			}
+		}
+	}
+	return findings
+}
+
+func analyzeReservedInstanceOpportunities(sess *session.Session) []Finding {
+	findings := []Finding{}
+	ec2Svc := ec2.New(sess)
+	ceSvc := costexplorer.New(sess)
+
+	// Get running instances
+	result, err := ec2Svc.DescribeInstances(&ec2.DescribeInstancesInput{
+		Filters: []*ec2.Filter{
+			{Name: aws.String("instance-state-name"), Values: []*string{aws.String("running")}},
+		},
+	})
+	if err != nil {
+		return findings
+	}
+
+	// Track instance types and their counts
+	instanceCounts := make(map[string]int)
+	instanceIDs := make(map[string][]string)
+	
+	for _, reservation := range result.Reservations {
+		for _, instance := range reservation.Instances {
+			if instance.InstanceType != nil {
+				instanceType := *instance.InstanceType
+				instanceCounts[instanceType]++
+				instanceIDs[instanceType] = append(instanceIDs[instanceType], *instance.InstanceId)
+			}
+		}
+	}
+
+	// Analyze usage patterns with Cost Explorer
+	endTime := time.Now()
+	startTime := endTime.AddDate(0, -3, 0) // Last 3 months
+	
+	// Get cost and usage data
+	costInput := &costexplorer.GetCostAndUsageInput{
+		TimePeriod: &costexplorer.DateInterval{
+			Start: aws.String(startTime.Format("2006-01-02")),
+			End:   aws.String(endTime.Format("2006-01-02")),
+		},
+		Granularity: aws.String("MONTHLY"),
+		Metrics:     []*string{aws.String("UnblendedCost")},
+		GroupBy: []*costexplorer.GroupDefinition{
+			{
+				Type: aws.String("DIMENSION"),
+				Key:  aws.String("INSTANCE_TYPE"),
+			},
+		},
+	}
+
+	_, err = ceSvc.GetCostAndUsage(costInput)
+	if err != nil {
+		log.Printf("Cost Explorer API error (may need permissions): %v", err)
+	}
+
+	// Recommend RIs for instances running >70% of the time
+	for instanceType, count := range instanceCounts {
+		if count >= 1 {
+			onDemandCost := estimateEC2Cost(&instanceType) * float64(count)
+			riCost := onDemandCost * 0.60 // ~40% savings with 1-year RI
+			savings := onDemandCost - riCost
+
+			findings = append(findings, Finding{
+				Type:                "cost",
+				Severity:            "high",
+				ResourceID:          fmt.Sprintf("%s (%d instances)", instanceType, count),
+				ResourceType:        "EC2-RI",
+				Issue:               fmt.Sprintf("%d %s instances running continuously", count, instanceType),
+				Recommendation:      fmt.Sprintf("Purchase 1-year Reserved Instances. Save ~$%.2f/month (40%% discount)", savings),
+				EstimatedMonthlyCost: onDemandCost,
+				PotentialSavings:    savings,
+			})
+		}
+	}
+
+	return findings
+}
+
+func analyzeSpotInstanceOpportunities(sess *session.Session) []Finding {
+	findings := []Finding{}
+	ec2Svc := ec2.New(sess)
+	cwSvc := cloudwatch.New(sess)
+
+	result, err := ec2Svc.DescribeInstances(&ec2.DescribeInstancesInput{
+		Filters: []*ec2.Filter{
+			{Name: aws.String("instance-state-name"), Values: []*string{aws.String("running")}},
+		},
+	})
+	if err != nil {
+		return findings
+	}
+
+	for _, reservation := range result.Reservations {
+		for _, instance := range reservation.Instances {
+			// Check if instance is suitable for Spot
+			// Criteria: Not in production, stateless workloads, fault-tolerant
+			
+			// Check tags for environment
+			isProduction := false
+			isStateless := false
+			
+			for _, tag := range instance.Tags {
+				if tag.Key != nil && tag.Value != nil {
+					if *tag.Key == "Environment" && (*tag.Value == "production" || *tag.Value == "prod") {
+						isProduction = true
+					}
+					if *tag.Key == "Workload" && (*tag.Value == "batch" || *tag.Value == "dev" || *tag.Value == "test") {
+						isStateless = true
+					}
+				}
+			}
+
+			// Also check if instance has low CPU variance (indicates non-critical workload)
+			endTime := time.Now()
+			startTime := endTime.Add(-7 * 24 * time.Hour)
+
+			cpuMetrics, err := cwSvc.GetMetricStatistics(&cloudwatch.GetMetricStatisticsInput{
+				Namespace:  aws.String("AWS/EC2"),
+				MetricName: aws.String("CPUUtilization"),
+				Dimensions: []*cloudwatch.Dimension{
+					{Name: aws.String("InstanceId"), Value: instance.InstanceId},
+				},
+				StartTime:  &startTime,
+				EndTime:    &endTime,
+				Period:     aws.Int64(3600),
+				Statistics: []*string{aws.String("Average"), aws.String("Maximum")},
+			})
+
+			if err == nil && len(cpuMetrics.Datapoints) > 0 && (!isProduction || isStateless) {
+				onDemandCost := estimateEC2Cost(instance.InstanceType)
+				spotCost := onDemandCost * 0.30 // ~70% savings with Spot
+				savings := onDemandCost - spotCost
+
+				suitability := "dev/test"
+				if isStateless {
+					suitability = "batch/stateless"
+				}
+
+				findings = append(findings, Finding{
+					Type:                "cost",
+					Severity:            "medium",
+					ResourceID:          *instance.InstanceId,
+					ResourceType:        "EC2-Spot",
+					Issue:               fmt.Sprintf("Instance suitable for Spot (%s workload)", suitability),
+					Recommendation:      fmt.Sprintf("Migrate to Spot Instances. Save ~$%.2f/month (70%% discount). Use Spot Fleet or Auto Scaling for fault tolerance", savings),
+					EstimatedMonthlyCost: onDemandCost,
+					PotentialSavings:    savings,
+				})
+			}
+		}
+	}
+
+	return findings
+}
+
+func performRightSizingAnalysis(sess *session.Session) []Finding {
+	findings := []Finding{}
+	ec2Svc := ec2.New(sess)
+	cwSvc := cloudwatch.New(sess)
+
+	result, err := ec2Svc.DescribeInstances(&ec2.DescribeInstancesInput{
+		Filters: []*ec2.Filter{
+			{Name: aws.String("instance-state-name"), Values: []*string{aws.String("running")}},
+		},
+	})
+	if err != nil {
+		return findings
+	}
+
+	for _, reservation := range result.Reservations {
+		for _, instance := range reservation.Instances {
+			endTime := time.Now()
+			startTime := endTime.Add(-14 * 24 * time.Hour) // 14 days
+
+			cpuMetrics, _ := cwSvc.GetMetricStatistics(&cloudwatch.GetMetricStatisticsInput{
+				Namespace:  aws.String("AWS/EC2"),
+				MetricName: aws.String("CPUUtilization"),
+				Dimensions: []*cloudwatch.Dimension{
+					{Name: aws.String("InstanceId"), Value: instance.InstanceId},
+				},
+				StartTime:  &startTime,
+				EndTime:    &endTime,
+				Period:     aws.Int64(3600),
+				Statistics: []*string{aws.String("Average"), aws.String("Maximum")},
+			})
+
+			if len(cpuMetrics.Datapoints) > 0 {
+				totalCPU := 0.0
+				maxCPU := 0.0
+				for _, dp := range cpuMetrics.Datapoints {
+					if dp.Average != nil {
+						totalCPU += *dp.Average
+					}
+					if dp.Maximum != nil && *dp.Maximum > maxCPU {
+						maxCPU = *dp.Maximum
+					}
+				}
+				avgCPU := totalCPU / float64(len(cpuMetrics.Datapoints))
+
+				currentCost := estimateEC2Cost(instance.InstanceType)
+				
+				// Detailed right-sizing recommendations
+				if avgCPU < 15 && maxCPU < 40 {
+					// Can downsize by 2 levels
+					potentialSavings := currentCost * 0.65
+					findings = append(findings, Finding{
+						Type:                "cost",
+						Severity:            "high",
+						ResourceID:          *instance.InstanceId,
+						ResourceType:        "EC2-RightSize",
+						Issue:               fmt.Sprintf("Significantly oversized (avg: %.1f%%, max: %.1f%%)", avgCPU, maxCPU),
+						Recommendation:      fmt.Sprintf("Downsize by 2 tiers. Performance risk: LOW. Save $%.2f/month", potentialSavings),
+						EstimatedMonthlyCost: currentCost,
+						PotentialSavings:    potentialSavings,
+					})
+				} else if avgCPU >= 15 && avgCPU < 30 && maxCPU < 60 {
+					// Can downsize by 1 level
+					potentialSavings := currentCost * 0.45
+					findings = append(findings, Finding{
+						Type:                "cost",
+						Severity:            "medium",
+						ResourceID:          *instance.InstanceId,
+						ResourceType:        "EC2-RightSize",
+						Issue:               fmt.Sprintf("Moderately oversized (avg: %.1f%%, max: %.1f%%)", avgCPU, maxCPU),
+						Recommendation:      fmt.Sprintf("Downsize by 1 tier. Performance risk: LOW. Save $%.2f/month", potentialSavings),
+						EstimatedMonthlyCost: currentCost,
+						PotentialSavings:    potentialSavings,
+					})
+				}
+			}
+		}
+	}
+
+	return findings
 }
