@@ -137,21 +137,24 @@ func scanAWS(req ScanRequest) []Finding {
 		findings = append(findings, iamFindings...)
 
 	case "cost":
-		// Unused Resource Detection
+		// Step 1: Get AWS Cost Explorer data (actual costs & forecast)
+		findings = append(findings, performCompleteCostAnalysis(sess)...)
+
+		// Step 2: Unused Resource Detection
 		findings = append(findings, scanIdleEC2Instances(sess)...)
 		findings = append(findings, scanUnattachedEBSVolumes(sess)...)
 		findings = append(findings, scanUnusedElasticIPs(sess)...)
 		findings = append(findings, scanOldSnapshots(sess)...)
 		findings = append(findings, scanStoppedInstances(sess)...)
 
-		// Right-Sizing Analysis
+		// Step 3: Right-Sizing Analysis with CloudWatch metrics
 		findings = append(findings, performRightSizingAnalysis(sess)...)
 		findings = append(findings, scanUndersizedInstances(sess)...)
 
-		// Reserved Instance Recommendations
+		// Step 4: Reserved Instance Recommendations
 		findings = append(findings, analyzeReservedInstanceOpportunities(sess)...)
 
-		// Spot Instance Opportunities
+		// Step 5: Spot Instance Opportunities
 		findings = append(findings, analyzeSpotInstanceOpportunities(sess)...)
 	}
 
@@ -808,5 +811,199 @@ func performRightSizingAnalysis(sess *session.Session) []Finding {
 		}
 	}
 
+	return findings
+}
+
+// Cost Analysis with AWS Cost Explorer and Native Recommendations
+
+func performCompleteCostAnalysis(sess *session.Session) []Finding {
+	findings := []Finding{}
+	
+	// Step 1: Get current month costs & forecast
+	costData := getCurrentMonthCosts(sess)
+	findings = append(findings, costData...)
+	
+	// Step 2: Get AWS native recommendations
+	nativeRecs := getAWSNativeRecommendations(sess)
+	findings = append(findings, nativeRecs...)
+	
+	return findings
+}
+
+func getCurrentMonthCosts(sess *session.Session) []Finding {
+	findings := []Finding{}
+	ceSvc := costexplorer.New(sess)
+	
+	// Get current month start and end dates
+	now := time.Now()
+	startOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	endOfMonth := startOfMonth.AddDate(0, 1, 0).Add(-time.Second)
+	
+	// Get current month costs
+	costInput := &costexplorer.GetCostAndUsageInput{
+		TimePeriod: &costexplorer.DateInterval{
+			Start: aws.String(startOfMonth.Format("2006-01-02")),
+			End:   aws.String(now.Format("2006-01-02")),
+		},
+		Granularity: aws.String("MONTHLY"),
+		Metrics:     []*string{aws.String("UnblendedCost"), aws.String("UsageQuantity")},
+		GroupBy: []*costexplorer.GroupDefinition{
+			{
+				Type: aws.String("DIMENSION"),
+				Key:  aws.String("SERVICE"),
+			},
+		},
+	}
+	
+	costResult, err := ceSvc.GetCostAndUsage(costInput)
+	if err != nil {
+		log.Printf("Cost Explorer API error: %v", err)
+		return findings
+	}
+	
+	// Parse costs by service
+	totalCost := 0.0
+	servicesCosts := make(map[string]float64)
+	
+	if len(costResult.ResultsByTime) > 0 {
+		for _, group := range costResult.ResultsByTime[0].Groups {
+			service := *group.Keys[0]
+			cost := 0.0
+			if group.Metrics["UnblendedCost"].Amount != nil {
+				fmt.Sscanf(*group.Metrics["UnblendedCost"].Amount, "%f", &cost)
+				servicesCosts[service] = cost
+				totalCost += cost
+			}
+		}
+	}
+	
+	// Get cost forecast for next month
+	forecastStart := endOfMonth.AddDate(0, 0, 1)
+	forecastEnd := forecastStart.AddDate(0, 1, 0)
+	
+	forecastInput := &costexplorer.GetCostForecastInput{
+		TimePeriod: &costexplorer.DateInterval{
+			Start: aws.String(forecastStart.Format("2006-01-02")),
+			End:   aws.String(forecastEnd.Format("2006-01-02")),
+		},
+		Metric:      aws.String("UNBLENDED_COST"),
+		Granularity: aws.String("MONTHLY"),
+	}
+	
+	forecastResult, err := ceSvc.GetCostForecast(forecastInput)
+	if err == nil && forecastResult.Total != nil && forecastResult.Total.Amount != nil {
+		forecastAmount := 0.0
+		fmt.Sscanf(*forecastResult.Total.Amount, "%f", &forecastAmount)
+		
+		// Create forecast finding
+		findings = append(findings, Finding{
+			Type:                "cost",
+			Severity:            "info",
+			ResourceID:          "cost-forecast",
+			ResourceType:        "CostForecast",
+			Issue:               fmt.Sprintf("Current month: $%.2f | Forecast next month: $%.2f", totalCost, forecastAmount),
+			Recommendation:      fmt.Sprintf("Monitor spending trends. Top services: EC2 ($%.2f), RDS ($%.2f)", servicesCosts["Amazon Elastic Compute Cloud - Compute"], servicesCosts["Amazon Relational Database Service"]),
+			EstimatedMonthlyCost: totalCost,
+			PotentialSavings:    0,
+		})
+	}
+	
+	return findings
+}
+
+func getAWSNativeRecommendations(sess *session.Session) []Finding {
+	findings := []Finding{}
+	ceSvc := costexplorer.New(sess)
+	
+	// Get EC2 Right Sizing Recommendations
+	rightsizeInput := &costexplorer.GetRightsizingRecommendationInput{
+		Service: aws.String("AmazonEC2"),
+	}
+	
+	rightsizeResult, err := ceSvc.GetRightsizingRecommendation(rightsizeInput)
+	if err == nil && rightsizeResult.RightsizingRecommendations != nil {
+		for _, rec := range rightsizeResult.RightsizingRecommendations {
+			if rec.CurrentInstance != nil && rec.RightsizingType != nil {
+				savings := 0.0
+				if rec.ModifyRecommendationDetail != nil && 
+				   rec.ModifyRecommendationDetail.TargetInstances != nil &&
+				   len(rec.ModifyRecommendationDetail.TargetInstances) > 0 &&
+				   rec.ModifyRecommendationDetail.TargetInstances[0].EstimatedMonthlySavings != nil {
+					fmt.Sscanf(*rec.ModifyRecommendationDetail.TargetInstances[0].EstimatedMonthlySavings, "%f", &savings)
+				}
+				
+				findings = append(findings, Finding{
+					Type:                "cost",
+					Severity:            "high",
+					ResourceID:          *rec.CurrentInstance.ResourceId,
+					ResourceType:        "EC2-AWS-Recommendation",
+					Issue:               fmt.Sprintf("AWS recommends: %s", *rec.RightsizingType),
+					Recommendation:      fmt.Sprintf("AWS native recommendation: %s. Estimated savings: $%.2f/month", *rec.RightsizingType, savings),
+					EstimatedMonthlyCost: 0,
+					PotentialSavings:    savings,
+				})
+			}
+		}
+	}
+	
+	// Get Reserved Instance Recommendations
+	riInput := &costexplorer.GetReservationPurchaseRecommendationInput{
+		Service:            aws.String("Amazon Elastic Compute Cloud - Compute"),
+		LookbackPeriodInDays: aws.String("SIXTY_DAYS"),
+		TermInYears:        aws.String("ONE_YEAR"),
+		PaymentOption:      aws.String("NO_UPFRONT"),
+	}
+	
+	riResult, err := ceSvc.GetReservationPurchaseRecommendation(riInput)
+	if err == nil && riResult.Recommendations != nil {
+		for _, rec := range riResult.Recommendations {
+			if rec.RecommendationSummary != nil && 
+			   rec.RecommendationSummary.TotalEstimatedMonthlySavingsAmount != nil {
+				savings := 0.0
+				fmt.Sscanf(*rec.RecommendationSummary.TotalEstimatedMonthlySavingsAmount, "%f", &savings)
+				
+				findings = append(findings, Finding{
+					Type:                "cost",
+					Severity:            "high",
+					ResourceID:          "ri-recommendation",
+					ResourceType:        "ReservedInstance",
+					Issue:               "AWS recommends purchasing Reserved Instances",
+					Recommendation:      fmt.Sprintf("AWS native RI recommendation. Estimated savings: $%.2f/month", savings),
+					EstimatedMonthlyCost: 0,
+					PotentialSavings:    savings,
+				})
+			}
+		}
+	}
+	
+	// Get Savings Plans Recommendations
+	spInput := &costexplorer.GetSavingsPlansPurchaseRecommendationInput{
+		SavingsPlansType:    aws.String("COMPUTE_SP"),
+		LookbackPeriodInDays: aws.String("SIXTY_DAYS"),
+		TermInYears:         aws.String("ONE_YEAR"),
+		PaymentOption:       aws.String("NO_UPFRONT"),
+	}
+	
+	spResult, err := ceSvc.GetSavingsPlansPurchaseRecommendation(spInput)
+	if err == nil && spResult.SavingsPlansPurchaseRecommendation != nil {
+		for _, rec := range spResult.SavingsPlansPurchaseRecommendation.SavingsPlansPurchaseRecommendationDetails {
+			if rec.EstimatedMonthlySavingsAmount != nil {
+				savings := 0.0
+				fmt.Sscanf(*rec.EstimatedMonthlySavingsAmount, "%f", &savings)
+				
+				findings = append(findings, Finding{
+					Type:                "cost",
+					Severity:            "high",
+					ResourceID:          "savings-plan",
+					ResourceType:        "SavingsPlan",
+					Issue:               "AWS recommends Savings Plan",
+					Recommendation:      fmt.Sprintf("AWS Compute Savings Plan. Estimated savings: $%.2f/month", savings),
+					EstimatedMonthlyCost: 0,
+					PotentialSavings:    savings,
+				})
+			}
+		}
+	}
+	
 	return findings
 }
